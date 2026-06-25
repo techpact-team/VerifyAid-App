@@ -1,22 +1,33 @@
-import 'package:supabase_flutter/supabase_flutter.dart' hide LocalStorage;
-
-import '../../core/storage/local_storage.dart' as app_storage;
+import '../../core/database/local_sync_queue.dart';
+import 'sync_queue_processor.dart';
+import 'sync_result.dart';
 
 class SyncService {
-  final supabase = Supabase.instance.client;
-  final localStorage = app_storage.LocalStorage();
+  SyncService({SyncQueueProcessor? processor, LocalSyncQueue? syncQueue})
+    : _processor = processor ?? SyncQueueProcessor(),
+      _syncQueue = syncQueue ?? LocalSyncQueue();
+
+  final SyncQueueProcessor _processor;
+  final LocalSyncQueue _syncQueue;
+
+  Future<SyncResult> syncOfflineData() {
+    return _processor.process();
+  }
 
   Future<int> syncPendingBeneficiaries() async {
-    final pending = await localStorage.getPendingBeneficiaries();
+    final result = await syncOfflineData();
+    return result.successCount;
+  }
 
-    if (pending.isEmpty) return 0;
+  Future<int> pendingCount() {
+    return _syncQueue.pendingCount();
+  }
 
-    for (final item in pending) {
-      await supabase.from('beneficiaries').insert(item);
-    }
+  Future<LocalSyncSummary> summary() {
+    return _syncQueue.summary();
+  }
 
-    await localStorage.clearPendingBeneficiaries();
-
-    return pending.length;
+  Future<List<Map<String, dynamic>>> recentLogs({int limit = 20}) {
+    return _syncQueue.recentLogs(limit: limit);
   }
 }

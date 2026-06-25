@@ -1,35 +1,59 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/network/connectivity_service.dart';
+import '../../core/storage/offline_cache_service.dart';
+
 class CurrentProfileService {
-  final supabase = Supabase.instance.client;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
   Future<Map<String, dynamic>?> getCurrentProfile() async {
-    final user = supabase.auth.currentUser;
+    final hasInternet = await ConnectivityService.hasInternetConnection();
 
-    if (user == null) {
-      debugPrint('No authenticated user found');
-      return null;
+    debugPrint('PROFILE SERVICE hasInternet: $hasInternet');
+
+    if (!hasInternet) {
+      final cachedProfile = await OfflineCacheService.getCachedProfile();
+
+      debugPrint('PROFILE SERVICE offline cached profile: $cachedProfile');
+
+      return cachedProfile;
     }
 
-    debugPrint('Current user id: ${user.id}');
+    final user = _supabase.auth.currentUser;
 
-    final profile = await supabase
-        .from('profiles')
-        .select('''
-          id,
-          full_name,
-          email,
-          tenant_id,
-          role_id,
-          location_id,
-          status
-        ''')
-        .eq('id', user.id)
-        .maybeSingle();
+    if (user == null) {
+      final cachedProfile = await OfflineCacheService.getCachedProfile();
 
-    debugPrint('Profile result: $profile');
+      debugPrint('PROFILE SERVICE no Supabase user. Using cache.');
 
-    return profile;
+      return cachedProfile;
+    }
+
+    try {
+      final profile = await _supabase
+          .from('profiles')
+          .select(
+            'id, full_name, email, tenant_id, role_id, location_id, status',
+          )
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profile != null) {
+        final mappedProfile = Map<String, dynamic>.from(profile);
+
+        await OfflineCacheService.saveCachedProfile(mappedProfile);
+
+        debugPrint('PROFILE SERVICE online profile cached: $mappedProfile');
+
+        return mappedProfile;
+      }
+
+      return OfflineCacheService.getCachedProfile();
+    } catch (e) {
+      debugPrint('PROFILE SERVICE online error: $e');
+
+      return OfflineCacheService.getCachedProfile();
+    }
   }
 }

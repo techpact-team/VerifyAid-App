@@ -1,9 +1,113 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/database/local_questionnaire_repository.dart';
+import '../../core/network/connectivity_service.dart';
+import '../../core/storage/offline_cache_service.dart';
+
 class QuestionnaireService {
   final supabase = Supabase.instance.client;
+  final localQuestionnaires = LocalQuestionnaireRepository();
 
+  /// Offline-aware fetch: returns cached data when offline, caches on success.
+  Future<Map<String, dynamic>?> getQuestionnaireForProgram({
+    required String programId,
+    required String tenantId,
+  }) async {
+    final hasInternet = await ConnectivityService.hasInternetConnection();
+
+    debugPrint('QUESTIONNAIRE SERVICE hasInternet: $hasInternet');
+    debugPrint('QUESTIONNAIRE SERVICE programId: $programId');
+    debugPrint('QUESTIONNAIRE SERVICE tenantId: $tenantId');
+
+    if (!hasInternet) {
+      final cached = await OfflineCacheService.getCachedQuestionnaire(
+        programId: programId,
+      );
+
+      debugPrint('QUESTIONNAIRE SERVICE offline cached: $cached');
+
+      return cached;
+    }
+
+    try {
+      final questionnaire = await supabase
+          .from('program_questionnaires')
+          .select(
+            'id, tenant_id, program_id, title, description, status, version',
+          )
+          .eq('program_id', programId)
+          .eq('tenant_id', tenantId)
+          .eq('status', 'published')
+          .order('version', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (questionnaire == null) {
+        debugPrint('QUESTIONNAIRE SERVICE no published questionnaire found.');
+
+        final cached = await OfflineCacheService.getCachedQuestionnaire(
+          programId: programId,
+        );
+
+        return cached;
+      }
+
+      final questionnaireId = questionnaire['id'].toString();
+
+      final questions = await supabase
+          .from('questionnaire_questions')
+          .select(
+            'id, tenant_id, questionnaire_id, question_text, question_type, options, required, sort_order, metadata',
+          )
+          .eq('questionnaire_id', questionnaireId)
+          .eq('tenant_id', tenantId)
+          .order('sort_order', ascending: true);
+
+      final mappedQuestionnaire = Map<String, dynamic>.from(questionnaire);
+
+      mappedQuestionnaire['questions'] = questions
+          .map<Map<String, dynamic>>(
+            (item) => Map<String, dynamic>.from(item),
+          )
+          .toList();
+
+      await OfflineCacheService.saveCachedQuestionnaire(
+        programId: programId,
+        questionnaire: mappedQuestionnaire,
+      );
+
+      debugPrint(
+        'QUESTIONNAIRE SERVICE cached questionnaire: $mappedQuestionnaire',
+      );
+
+      return mappedQuestionnaire;
+    } catch (e) {
+      debugPrint('QUESTIONNAIRE SERVICE online error: $e');
+
+      final cached = await OfflineCacheService.getCachedQuestionnaire(
+        programId: programId,
+      );
+
+      debugPrint('QUESTIONNAIRE SERVICE fallback cached: $cached');
+
+      return cached;
+    }
+  }
+
+  /// Pre-warms the offline cache for a program's questionnaire.
+  Future<void> cacheQuestionnaireForProgram({
+    required String programId,
+    required String tenantId,
+  }) async {
+    await getQuestionnaireForProgram(
+      programId: programId,
+      tenantId: tenantId,
+    );
+  }
+
+  /// Online-only fetch (no offline cache). Use getQuestionnaireForProgram
+  /// for offline-aware access.
   Future<Map<String, dynamic>?> getActiveQuestionnaire({
     required String programId,
     required String tenantId,
@@ -262,34 +366,41 @@ class QuestionnaireService {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
-  Future<void> saveQuestionnaireResponse({
+  Future<String> saveQuestionnaireResponse({
     required String tenantId,
     required String questionnaireId,
     required String programId,
     required String beneficiaryId,
     required String submittedBy,
     required Map<String, dynamic> answers,
+    String? responseId,
   }) async {
+    final payload = <String, dynamic>{
+      'tenant_id': tenantId,
+      'questionnaire_id': questionnaireId,
+      'program_id': programId,
+      'beneficiary_id': beneficiaryId,
+      'submitted_by': submittedBy,
+      'status': 'submitted',
+      'submitted_at': DateTime.now().toIso8601String(),
+    };
+
+    if (responseId != null) {
+      payload['id'] = responseId;
+    }
+
     final response = await supabase
         .from('questionnaire_responses')
-        .insert({
-          'tenant_id': tenantId,
-          'questionnaire_id': questionnaireId,
-          'program_id': programId,
-          'beneficiary_id': beneficiaryId,
-          'submitted_by': submittedBy,
-          'status': 'submitted',
-          'submitted_at': DateTime.now().toIso8601String(),
-        })
+        .insert(payload)
         .select('id')
         .single();
 
-    final responseId = response['id'];
+    final savedResponseId = response['id'];
 
     final answerRows = answers.entries.map((entry) {
       return {
         'tenant_id': tenantId,
-        'response_id': responseId,
+        'response_id': savedResponseId,
         'question_id': entry.key,
         'answer_text': entry.value?.toString(),
         'answer_json': {'value': entry.value},
@@ -299,6 +410,28 @@ class QuestionnaireService {
     if (answerRows.isNotEmpty) {
       await supabase.from('questionnaire_answers').insert(answerRows);
     }
+
+    return savedResponseId as String;
+  }
+
+  Future<String> saveQuestionnaireResponseLocally({
+    required String localBeneficiaryId,
+    String? remoteBeneficiaryId,
+    required String tenantId,
+    required String questionnaireId,
+    required String programId,
+    required String submittedBy,
+    required Map<String, dynamic> answers,
+  }) {
+    return localQuestionnaires.savePendingResponse(
+      localBeneficiaryId: localBeneficiaryId,
+      remoteBeneficiaryId: remoteBeneficiaryId,
+      tenantId: tenantId,
+      programId: programId,
+      questionnaireId: questionnaireId,
+      submittedBy: submittedBy,
+      answers: answers,
+    );
   }
 }
 

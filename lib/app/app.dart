@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../core/theme/app_theme.dart';
 import 'router.dart';
 
 class VerifyAidMobileApp extends StatelessWidget {
@@ -10,7 +12,7 @@ class VerifyAidMobileApp extends StatelessWidget {
       title: 'VerifyAid',
       debugShowCheckedModeBanner: false,
       routerConfig: appRouter,
-      theme: ThemeData(primarySwatch: Colors.green, useMaterial3: true),
+      theme: AppTheme.light,
     );
   }
 }

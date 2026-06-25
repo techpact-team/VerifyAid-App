@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/network/connectivity_service.dart';
+import '../../core/storage/offline_cache_service.dart';
+
 class ProgramService {
-  final supabase = Supabase.instance.client;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
   Future<List<Map<String, dynamic>>> getAssignedPrograms({
     required String tenantId,
@@ -11,39 +14,69 @@ class ProgramService {
     debugPrint('PROGRAM SERVICE tenantId: $tenantId');
     debugPrint('PROGRAM SERVICE locationId: $locationId');
 
-    final response = await supabase
-        .from('program_locations')
-        .select('''
-          id,
-          tenant_id,
-          location_id,
-          programs (
+    final hasInternet = await ConnectivityService.hasInternetConnection();
+
+    debugPrint('PROGRAM SERVICE hasInternet: $hasInternet');
+
+    if (!hasInternet) {
+      final cachedPrograms = await OfflineCacheService.getCachedPrograms();
+
+      debugPrint('PROGRAM SERVICE offline cached programs: $cachedPrograms');
+
+      return cachedPrograms;
+    }
+
+    try {
+      final rows = await _supabase
+          .from('program_locations')
+          .select('''
             id,
-            name,
-            description,
             tenant_id,
-            status
-          )
-        ''')
-        .eq('tenant_id', tenantId)
-        .eq('location_id', locationId);
+            location_id,
+            programs (
+              id,
+              name,
+              description,
+              tenant_id,
+              status
+            )
+          ''')
+          .eq('tenant_id', tenantId)
+          .eq('location_id', locationId);
 
-    debugPrint('PROGRAM SERVICE raw response: $response');
+      debugPrint('PROGRAM SERVICE raw response: $rows');
 
-    final rows = List<Map<String, dynamic>>.from(response);
+      final programs = <Map<String, dynamic>>[];
 
-    final programs = rows
-        .map((row) => row['programs'])
-        .where((program) => program != null)
-        .map((program) => Map<String, dynamic>.from(program))
-        .where((program) {
-          final status = program['status']?.toString().toLowerCase();
-          return status == null || status == 'active';
-        })
-        .toList();
+      for (final row in rows) {
+        final program = row['programs'];
 
-    debugPrint('PROGRAM SERVICE parsed programs: $programs');
+        if (program == null) {
+          continue;
+        }
 
-    return programs;
+        final mappedProgram = Map<String, dynamic>.from(program);
+
+        final status = mappedProgram['status']?.toString() ?? 'active';
+
+        if (status == 'active') {
+          programs.add(mappedProgram);
+        }
+      }
+
+      await OfflineCacheService.saveCachedPrograms(programs);
+
+      debugPrint('PROGRAM SERVICE parsed programs: $programs');
+
+      return programs;
+    } catch (e) {
+      debugPrint('PROGRAM SERVICE online error: $e');
+
+      final cachedPrograms = await OfflineCacheService.getCachedPrograms();
+
+      debugPrint('PROGRAM SERVICE fallback cached programs: $cachedPrograms');
+
+      return cachedPrograms;
+    }
   }
 }

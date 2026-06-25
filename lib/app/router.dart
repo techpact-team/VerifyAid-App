@@ -4,6 +4,8 @@ import '../features/auth/login_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/beneficiaries/register_beneficiary_screen.dart';
 import '../features/distribution/distribution_search_screen.dart';
+import '../features/sync/sync_status_screen.dart';
+import '../features/distribution/distribution_verify_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/login',
@@ -17,6 +19,17 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/distribution',
       builder: (context, state) => const DistributionSearchScreen(),
+    ),
+    GoRoute(
+      path: '/sync',
+      builder: (context, state) => const SyncStatusScreen(),
+    ),
+    GoRoute(
+     path: '/distribution/verify',
+     builder: (context, state) {
+     final beneficiary = state.extra as Map<String, dynamic>;
+     return DistributionVerifyScreen(beneficiary: beneficiary);
+     },
     ),
   ],
 );
