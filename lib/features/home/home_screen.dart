@@ -20,7 +20,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? profile;
   bool loading = true;
   bool syncing = false;
-  int pendingSyncCount = 0;
   String? error;
 
   @override
@@ -39,8 +38,6 @@ class _HomeScreenState extends State<HomeScreen> {
         profile = data;
         loading = false;
       });
-
-      await loadPendingSyncCount();
     } catch (e) {
       if (!mounted) return;
 
@@ -62,13 +59,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final result = await syncService.syncOfflineData();
-      final pendingCount = await syncService.pendingCount();
 
       if (!mounted) return;
-
-      setState(() {
-        pendingSyncCount = pendingCount;
-      });
 
       scaffoldMessenger.showSnackBar(SnackBar(content: Text(result.summary)));
     } catch (e) {
@@ -88,32 +80,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> loadPendingSyncCount() async {
-    try {
-      final count = await syncService.pendingCount();
-
-      if (!mounted) return;
-
-      setState(() {
-        pendingSyncCount = count;
-      });
-    } catch (_) {
-      // Sync count is informational and should not block Home.
-    }
-  }
-
   String _profileValue(String key, {String fallback = 'N/A'}) {
     return fieldDisplayValue(profile?[key], fallback: fallback);
-  }
-
-  String _profileFirst(List<String> keys, {String fallback = 'N/A'}) {
-    for (final key in keys) {
-      final value = profile?[key]?.toString().trim();
-      if (value != null && value.isNotEmpty) {
-        return value;
-      }
-    }
-    return fallback;
   }
 
   @override
@@ -164,174 +132,110 @@ class _HomeScreenState extends State<HomeScreen> {
         child: RefreshIndicator(
           onRefresh: loadProfile,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             children: [
               FieldSurface(
-                color: const Color(0xFFF1FAF7),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                padding: const EdgeInsets.all(18),
+                color: AppColors.surface,
+                borderColor: AppColors.primary.withValues(alpha: 0.12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        FieldPhotoAvatar(
-                          label: _profileValue('full_name', fallback: 'VA'),
-                          size: 52,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    FieldPhotoAvatar(
+                      label: _profileValue('full_name', fallback: 'VA'),
+                      size: 64,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Welcome back',
+                            style: TextStyle(
+                              color: AppColors.muted,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _profileValue(
+                              'full_name',
+                              fallback: 'Field Officer',
+                            ),
+                            softWrap: true,
+                            style: const TextStyle(
+                              color: AppColors.text,
+                              fontSize: 24,
+                              height: 1.12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
                             children: [
-                              const Text(
-                                'Welcome back,',
-                                style: TextStyle(
-                                  color: AppColors.muted,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
+                              const Flexible(
+                                child: Text(
+                                  'Field Officer',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: AppColors.muted,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                               ),
-                              Text(
-                                _profileValue(
-                                  'full_name',
-                                  fallback: 'Field Officer',
+                              const SizedBox(width: 10),
+                              FieldStatusPill(
+                                label: _profileValue(
+                                  'status',
+                                  fallback: 'Online',
                                 ),
-                                softWrap: true,
-                                style: const TextStyle(
-                                  color: AppColors.text,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              const Text(
-                                'Field Officer',
-                                style: TextStyle(
-                                  color: AppColors.muted,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                                icon: Icons.wifi,
+                                color: AppColors.primary,
                               ),
                             ],
                           ),
-                        ),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () {},
-                          icon: const Icon(
-                            Icons.notifications_none,
-                            color: AppColors.text,
-                          ),
-                        ),
-                        FieldStatusPill(
-                          label: _profileValue('status', fallback: 'Online'),
-                          icon: Icons.wifi,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    const Divider(height: 1),
-                    const SizedBox(height: 14),
-                    FieldInfoRow(
-                      icon: Icons.apartment,
-                      label: 'Organization',
-                      value: _profileFirst([
-                        'organization_name',
-                        'tenant_name',
-                        'tenant_id',
-                      ], fallback: 'Assigned organization'),
-                    ),
-                    const SizedBox(height: 12),
-                    FieldInfoRow(
-                      icon: Icons.location_on_outlined,
-                      label: 'Location',
-                      value: _profileFirst([
-                        'location_name',
-                        'location_id',
-                      ], fallback: 'Assigned location'),
-                    ),
-                    const SizedBox(height: 12),
-                    FieldInfoRow(
-                      icon: Icons.sync,
-                      label: 'Offline Sync',
-                      value: pendingSyncCount == 0
-                          ? 'All caught up'
-                          : '$pendingSyncCount pending records',
-                      iconColor: pendingSyncCount == 0
-                          ? AppColors.primary
-                          : AppColors.amber,
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: _DashboardActionCard(
-                      icon: Icons.person_add_alt_1,
-                      title: 'Register\nBeneficiary',
-                      color: AppColors.primary,
-                      onTap: () => context.go('/beneficiaries/register'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _DashboardActionCard(
-                      icon: Icons.inventory_2_outlined,
-                      title: 'Start\nDistribution',
-                      color: AppColors.info,
-                      onTap: () => context.go('/distribution'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _DashboardActionCard(
-                      icon: Icons.cloud_upload_outlined,
-                      title: 'Sync Offline\nData',
-                      color: const Color(0xFF6C5CE7),
-                      onTap: syncing ? null : syncOfflineData,
-                      busy: syncing,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 20),
               const Text(
-                'Today\'s Overview',
+                'Quick Actions',
                 style: TextStyle(
                   color: AppColors.text,
-                  fontSize: 15,
+                  fontSize: 18,
                   fontWeight: FontWeight.w900,
                 ),
               ),
+              const SizedBox(height: 12),
+              _HomeActionTile(
+                icon: Icons.person_add_alt_1,
+                title: 'Register Beneficiary',
+                subtitle: 'Add a person and capture their details.',
+                color: AppColors.primary,
+                onTap: () => context.go('/beneficiaries/register'),
+              ),
               const SizedBox(height: 10),
-              Row(
-                children: [
-                  const Expanded(
-                    child: _OverviewCard(
-                      label: 'Registered\nToday',
-                      value: '0',
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _OverviewCard(
-                      label: 'Pending\nSync',
-                      value: pendingSyncCount.toString(),
-                      color: AppColors.amber,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: _OverviewCard(
-                      label: 'Distributions\nCompleted',
-                      value: '0',
-                      color: AppColors.info,
-                    ),
-                  ),
-                ],
+              _HomeActionTile(
+                icon: Icons.inventory_2_outlined,
+                title: 'Start Distribution',
+                subtitle: 'Find a beneficiary and record support.',
+                color: AppColors.primaryBright,
+                onTap: () => context.go('/distribution'),
+              ),
+              const SizedBox(height: 10),
+              _HomeActionTile(
+                icon: Icons.cloud_upload_outlined,
+                title: 'Sync Offline Data',
+                subtitle: 'Upload saved work when you have a connection.',
+                color: AppColors.amber,
+                onTap: syncing ? null : syncOfflineData,
+                busy: syncing,
               ),
             ],
           ),
@@ -357,10 +261,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _DashboardActionCard extends StatelessWidget {
-  const _DashboardActionCard({
+class _HomeActionTile extends StatelessWidget {
+  const _HomeActionTile({
     required this.icon,
     required this.title,
+    required this.subtitle,
     required this.color,
     required this.onTap,
     this.busy = false,
@@ -368,97 +273,80 @@ class _DashboardActionCard extends StatelessWidget {
 
   final IconData icon;
   final String title;
+  final String subtitle;
   final Color color;
   final VoidCallback? onTap;
   final bool busy;
 
   @override
   Widget build(BuildContext context) {
-    return FieldSurface(
-      padding: EdgeInsets.zero,
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: SizedBox(
-          height: 92,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                busy
-                    ? SizedBox(
-                        height: 28,
-                        width: 28,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: color,
-                        ),
-                      )
-                    : Icon(icon, color: color, size: 28),
-                const SizedBox(height: 8),
-                Text(
-                  title,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.text,
-                    fontSize: 12,
-                    height: 1.15,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ],
-            ),
+        borderRadius: BorderRadius.circular(10),
+        child: Ink(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.border),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _OverviewCard extends StatelessWidget {
-  const _OverviewCard({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return FieldSurface(
-      padding: const EdgeInsets.all(10),
-      child: SizedBox(
-        height: 70,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: AppColors.muted,
-                fontSize: 10,
-                height: 1.15,
-                fontWeight: FontWeight.w800,
+          child: Row(
+            children: [
+              Container(
+                height: 50,
+                width: 50,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Center(
+                  child: busy
+                      ? SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: color,
+                          ),
+                        )
+                      : Icon(icon, color: color, size: 25),
+                ),
               ),
-            ),
-            const Spacer(),
-            Text(
-              value,
-              style: TextStyle(
-                color: color,
-                fontSize: 24,
-                fontWeight: FontWeight.w900,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.text,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      softWrap: true,
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 13.5,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              const SizedBox(width: 10),
+              Icon(Icons.chevron_right, color: color, size: 24),
+            ],
+          ),
         ),
       ),
     );

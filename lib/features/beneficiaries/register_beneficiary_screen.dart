@@ -12,8 +12,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/field_app_widgets.dart';
 import '../../services/biometric_service.dart';
 import '../auth/current_profile_service.dart';
-import '../biometrics/face_quality_result.dart';
-import '../biometrics/face_scan_service.dart';
+import '../face_verification/face_capture_service.dart';
+import '../face_verification/face_quality_service.dart';
 import '../programs/program_service.dart';
 import '../questionnaires/questionnaire_service.dart';
 import 'beneficiary_draft.dart';
@@ -39,7 +39,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
   final beneficiaryService = BeneficiaryService();
   final questionnaireService = QuestionnaireService();
   final imagePicker = ImagePicker();
-  final faceScanService = FaceScanService();
+  final faceCaptureService = FaceCaptureService();
   final BiometricService _biometricService = BiometricService();
 
   final fullNameController = TextEditingController();
@@ -62,7 +62,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
 
   File? selectedPhoto;
   File? selectedFacePhoto;
-  FaceQualityResult? faceQualityResult;
+  FaceQualityAssessment? faceQualityResult;
   String? _beneficiaryId;
   String? _uploadedPhotoUrl;
   String? _uploadedFacePhotoUrl;
@@ -139,7 +139,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
     });
 
     try {
-      final result = await faceScanService.captureAndValidateFace();
+      final result = await faceCaptureService.captureValidatedFace();
 
       if (result == null) {
         return;
@@ -149,13 +149,11 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
 
       setState(() {
         faceQualityResult = result.quality;
-        selectedFacePhoto = result.isSuccess
-            ? File(result.localImagePath!)
-            : null;
+        selectedFacePhoto = result.isAccepted ? result.file : null;
         _uploadedFacePhotoUrl = null;
       });
 
-      if (!result.isSuccess) {
+      if (!result.isAccepted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(result.quality.message)));
@@ -749,7 +747,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
     final result = await beneficiaryService.saveBeneficiary(
       draft: draft,
       photoLocalPath: selectedPhoto?.path,
-      facePhotoLocalPath: (selectedFacePhoto ?? selectedPhoto)?.path,
+      facePhotoLocalPath: selectedFacePhoto?.path,
     );
 
     if (result.remoteId != null) {
@@ -782,7 +780,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
   }
 
   Future<String?> _uploadFacePhoto({required String beneficiaryId}) async {
-    final facePhoto = selectedFacePhoto ?? selectedPhoto;
+    final facePhoto = selectedFacePhoto;
     if (facePhoto == null) {
       return null;
     }
@@ -934,6 +932,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
           beneficiaryId: beneficiaryId,
           tenantId: _tenantId!,
           photoUrl: _uploadedFacePhotoUrl!,
+          qualityScore: faceQualityResult?.qualityScore,
         );
       }
 
@@ -1086,7 +1085,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Face Verification',
+                  'Face Enrollment',
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 3),
@@ -1094,7 +1093,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
                   quality == null
                       ? 'Not scanned'
                       : quality.isAccepted
-                      ? 'Verified'
+                      ? 'Face captured'
                       : quality.message,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -1108,7 +1107,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
             ),
           ),
           if (quality != null && quality.isAccepted)
-            const FieldStatusPill(label: 'Verified', icon: Icons.check_circle)
+            const FieldStatusPill(label: 'Captured', icon: Icons.check_circle)
           else
             TextButton.icon(
               onPressed: _scanningFace ? null : scanFace,
@@ -1254,12 +1253,21 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        appBar: AppBar(
+          leading: const FieldBackButton(),
+          title: const Text('Register Beneficiary'),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
 
     if (error != null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Register Beneficiary')),
+        appBar: AppBar(
+          leading: const FieldBackButton(),
+          title: const Text('Register Beneficiary'),
+        ),
         body: SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(16),
@@ -1281,13 +1289,19 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
     return Scaffold(
       backgroundColor: _formBackgroundColor,
       appBar: AppBar(
+        leading: const FieldBackButton(),
         title: const Text('Register Beneficiary'),
         actions: [
           IconButton(
             onPressed: _savingDraft ? null : _saveDetailsAndMoveToFingerprint,
             icon: const Icon(Icons.save_outlined),
+            tooltip: 'Save',
           ),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: AppColors.border),
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -1371,24 +1385,32 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
           ),
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _savingDraft ? null : _saveDetailsAndMoveToFingerprint,
-              icon: _savingDraft
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.save),
-              label: Text(_savingDraft ? 'Saving...' : 'Save Beneficiary'),
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: AppColors.border)),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _savingDraft
+                    ? null
+                    : _saveDetailsAndMoveToFingerprint,
+                icon: _savingDraft
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.save_alt_outlined),
+                label: Text(_savingDraft ? 'Saving…' : 'Save & Continue'),
+              ),
             ),
           ),
         ),

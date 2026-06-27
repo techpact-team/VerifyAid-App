@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../theme/app_theme.dart';
 
@@ -12,6 +13,35 @@ String fieldDisplayValue(Object? value, {String fallback = 'N/A'}) {
   return text;
 }
 
+class FieldBackButton extends StatelessWidget {
+  const FieldBackButton({
+    super.key,
+    this.fallbackLocation = '/home',
+    this.tooltip = 'Back',
+  });
+
+  final String fallbackLocation;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      icon: const Icon(Icons.arrow_back_rounded),
+      onPressed: () {
+        final navigator = Navigator.of(context);
+
+        if (navigator.canPop()) {
+          navigator.pop();
+          return;
+        }
+
+        context.go(fallbackLocation);
+      },
+    );
+  }
+}
+
 class FieldLogo extends StatelessWidget {
   const FieldLogo({super.key, this.compact = false});
 
@@ -19,8 +49,8 @@ class FieldLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final markSize = compact ? 38.0 : 58.0;
-    final titleSize = compact ? 27.0 : 33.0;
+    final markSize = compact ? 36.0 : 54.0;
+    final titleSize = compact ? 24.0 : 30.0;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -28,55 +58,67 @@ class FieldLogo extends StatelessWidget {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
+            SizedBox(
               height: markSize,
               width: markSize,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(compact ? 10 : 14),
-                border: Border.all(
-                  color: AppColors.primaryDark,
-                  width: compact ? 1.6 : 2,
-                ),
-              ),
               child: Stack(
                 alignment: Alignment.center,
                 children: [
                   Icon(
                     Icons.shield_outlined,
                     color: AppColors.primaryDark,
-                    size: compact ? 29 : 43,
+                    size: markSize,
                   ),
-                  Padding(
-                    padding: EdgeInsets.only(top: compact ? 5 : 7),
+                  Positioned(
+                    top: compact ? 6 : 9,
+                    child: Icon(
+                      Icons.check,
+                      color: AppColors.primary,
+                      size: compact ? 12 : 18,
+                    ),
+                  ),
+                  Positioned(
+                    bottom: compact ? 5 : 8,
                     child: Icon(
                       Icons.groups_2,
-                      color: AppColors.primaryDark,
-                      size: compact ? 16 : 22,
+                      color: AppColors.primary,
+                      size: compact ? 12 : 18,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            Text(
-              'VerifyAid',
-              style: TextStyle(
-                color: AppColors.primaryDark,
-                fontSize: titleSize,
-                fontWeight: FontWeight.w900,
+            const SizedBox(width: 12),
+            RichText(
+              text: TextSpan(
+                style: TextStyle(
+                  fontFamily: 'Mulish',
+                  fontSize: titleSize,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+                children: const [
+                  TextSpan(
+                    text: 'VERIFY',
+                    style: TextStyle(color: AppColors.primaryDark),
+                  ),
+                  TextSpan(
+                    text: 'AID',
+                    style: TextStyle(color: AppColors.primary),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         Text(
           'FIELD OPERATIONS',
           style: TextStyle(
             color: AppColors.muted,
-            fontSize: compact ? 10 : 12,
+            fontSize: compact ? 9 : 11,
             fontWeight: FontWeight.w800,
-            letterSpacing: 0,
+            letterSpacing: 1.2,
           ),
         ),
       ],
@@ -108,12 +150,12 @@ class FieldSurface extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: borderColor),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x0A10231D),
-            blurRadius: 12,
+            color: Color(0x030A2D4E),
+            blurRadius: 16,
             offset: Offset(0, 4),
           ),
         ],
@@ -145,10 +187,10 @@ class FieldInfoRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          height: 32,
-          width: 32,
+          height: 36,
+          width: 36,
           decoration: BoxDecoration(
-            color: iconColor.withValues(alpha: 0.12),
+            color: iconColor.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, color: iconColor, size: 18),
@@ -162,7 +204,7 @@ class FieldInfoRow extends StatelessWidget {
                 label,
                 style: const TextStyle(
                   color: AppColors.muted,
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -203,16 +245,16 @@ class FieldStatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       constraints: const BoxConstraints(maxWidth: 190),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: backgroundColor ?? color.withValues(alpha: 0.12),
+        color: backgroundColor ?? color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, color: color, size: 14),
+            Icon(icon, color: color, size: 13),
             const SizedBox(width: 5),
           ],
           Flexible(
@@ -221,7 +263,7 @@ class FieldStatusPill extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: color,
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -254,29 +296,29 @@ class FieldActionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: AppColors.surface,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         child: Ink(
           width: double.infinity,
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(color: AppColors.border),
           ),
           child: Row(
             children: [
               Container(
-                height: 42,
-                width: 42,
+                height: 44,
+                width: 44,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
+                  color: color.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, color: color),
+                child: Icon(icon, color: color, size: 22),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -334,7 +376,7 @@ class FieldMetricTile extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, color: color, size: 18),
+              Icon(icon, color: color, size: 16),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -342,20 +384,20 @@ class FieldMetricTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: AppColors.muted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.text,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
             ),
           ),
         ],
@@ -398,7 +440,7 @@ class FieldPhotoAvatar extends StatelessWidget {
           ? Text(
               initials.isEmpty ? 'VA' : initials,
               style: const TextStyle(
-                color: AppColors.primaryDark,
+                color: AppColors.primary,
                 fontWeight: FontWeight.w900,
               ),
             )

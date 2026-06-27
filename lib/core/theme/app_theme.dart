@@ -3,22 +3,22 @@ import 'package:flutter/material.dart';
 class AppColors {
   const AppColors._();
 
-  static const Color primary = Color(0xFF078B5B);
-  static const Color primaryBright = Color(0xFF10A46B);
-  static const Color primaryDark = Color(0xFF065C42);
-  static const Color primarySoft = Color(0xFFE7F5EF);
-  static const Color canvas = Color(0xFFFBFEFC);
-  static const Color faint = Color(0xFFF3F8F6);
+  static const Color primary = Color(0xFF00A896);
+  static const Color primaryBright = Color(0xFF14CBB7);
+  static const Color primaryDark = Color(0xFF0A2D4E);
+  static const Color primarySoft = Color(0xFFE6F7F5);
+  static const Color canvas = Color(0xFFF7F9FB);
+  static const Color faint = Color(0xFFEEF3F7);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color border = Color(0xFFDCE8E2);
-  static const Color text = Color(0xFF10231D);
-  static const Color muted = Color(0xFF65746E);
-  static const Color amber = Color(0xFFF59E0B);
-  static const Color amberSoft = Color(0xFFFFF7E6);
-  static const Color danger = Color(0xFFE53E3E);
-  static const Color dangerSoft = Color(0xFFFFECEC);
-  static const Color info = Color(0xFF2563EB);
-  static const Color infoSoft = Color(0xFFEFF6FF);
+  static const Color border = Color(0xFFE2E8EF);
+  static const Color text = Color(0xFF0A2D4E);
+  static const Color muted = Color(0xFF6B7A8D);
+  static const Color amber = Color(0xFFF57C00);
+  static const Color amberSoft = Color(0xFFFFF4E6);
+  static const Color danger = Color(0xFFD32F2F);
+  static const Color dangerSoft = Color(0xFFFFEEEE);
+  static const Color info = Color(0xFF00A896);
+  static const Color infoSoft = Color(0xFFE6F7F5);
 }
 
 class AppTheme {
@@ -31,7 +31,7 @@ class AppTheme {
           brightness: Brightness.light,
         ).copyWith(
           primary: AppColors.primary,
-          secondary: AppColors.info,
+          secondary: AppColors.primaryDark,
           surface: AppColors.surface,
           error: AppColors.danger,
         );
@@ -64,7 +64,7 @@ class AppTheme {
         margin: EdgeInsets.zero,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           side: const BorderSide(color: AppColors.border),
         ),
       ),
@@ -76,23 +76,23 @@ class AppTheme {
         filled: true,
         fillColor: AppColors.surface,
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 11,
+          horizontal: 14,
+          vertical: 14,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: AppColors.border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: AppColors.border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: AppColors.danger),
         ),
         labelStyle: const TextStyle(color: AppColors.muted),
@@ -100,11 +100,11 @@ class AppTheme {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          minimumSize: const Size.fromHeight(46),
+          minimumSize: const Size.fromHeight(48),
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           textStyle: const TextStyle(
             fontFamily: 'Mulish',
             fontSize: 14,
@@ -114,10 +114,10 @@ class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size.fromHeight(46),
+          minimumSize: const Size.fromHeight(48),
           foregroundColor: AppColors.primaryDark,
           side: const BorderSide(color: AppColors.primary),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           textStyle: const TextStyle(
             fontFamily: 'Mulish',
             fontSize: 14,
@@ -127,7 +127,7 @@ class AppTheme {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: AppColors.primaryDark,
+          foregroundColor: AppColors.primary,
           textStyle: const TextStyle(
             fontFamily: 'Mulish',
             fontWeight: FontWeight.w800,
@@ -136,7 +136,7 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         backgroundColor: AppColors.text,
         contentTextStyle: const TextStyle(color: Colors.white),
       ),

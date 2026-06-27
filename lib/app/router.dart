@@ -27,8 +27,13 @@ final appRouter = GoRouter(
     GoRoute(
      path: '/distribution/verify',
      builder: (context, state) {
-     final beneficiary = state.extra as Map<String, dynamic>;
-     return DistributionVerifyScreen(beneficiary: beneficiary);
+       final extra = state.extra as Map<String, dynamic>;
+       final beneficiary = extra['beneficiary'] as Map<String, dynamic>;
+       final lookupMethod = extra['lookupMethod'] as String? ?? 'search';
+       return DistributionVerifyScreen(
+         beneficiary: beneficiary,
+         lookupMethod: lookupMethod,
+       );
      },
     ),
   ],

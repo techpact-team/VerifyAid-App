@@ -7,15 +7,16 @@ class BiometricService {
     required String beneficiaryId,
     required String tenantId,
     required String photoUrl,
+    double? qualityScore,
   }) async {
     await _client.from('biometric_enrollments').insert({
       'beneficiary_id': beneficiaryId,
       'tenant_id': tenantId,
       'biometric_type': 'face',
-      'provider': 'camera_photo',
+      'provider': 'google_mlkit_face_detection',
       'template_id': 'face_${DateTime.now().millisecondsSinceEpoch}',
       'template_data': photoUrl,
-      'quality_score': 85,
+      'quality_score': (qualityScore ?? 85).round(),
       'status': 'active',
     });
   }

@@ -83,7 +83,12 @@ class _FingerprintEnrollmentScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Fingerprint Enrollment')),
+      appBar: AppBar(
+        leading: const FieldBackButton(
+          fallbackLocation: '/beneficiaries/register',
+        ),
+        title: const Text('Fingerprint Enrollment'),
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
