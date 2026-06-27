@@ -230,6 +230,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 10),
               _HomeActionTile(
+                icon: Icons.fingerprint,
+                title: 'Device Configuration',
+                subtitle: 'Set up the SecuGen fingerprint scanner.',
+                color: AppColors.info,
+                onTap: () => context.go('/devices/config'),
+              ),
+              const SizedBox(height: 10),
+              _HomeActionTile(
                 icon: Icons.cloud_upload_outlined,
                 title: 'Sync Offline Data',
                 subtitle: 'Upload saved work when you have a connection.',
