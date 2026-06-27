@@ -2,11 +2,18 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/theme/app_theme.dart';
+import '../../core/widgets/field_app_widgets.dart';
 import '../../services/biometric_service.dart';
 import '../auth/current_profile_service.dart';
+import '../face_verification/face_capture_service.dart';
+import '../face_verification/face_quality_service.dart';
 import '../programs/program_service.dart';
 import '../questionnaires/questionnaire_service.dart';
 import 'beneficiary_draft.dart';
@@ -22,15 +29,17 @@ class RegisterBeneficiaryScreen extends StatefulWidget {
 }
 
 class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
-  static const Color _formAccentColor = Color(0xFF673AB7);
-  static const Color _formBackgroundColor = Color(0xFFF6F6F8);
-  static const Color _formBorderColor = Color(0xFFE0E0E0);
+  static const Color _formAccentColor = AppColors.primary;
+  static const Color _formBackgroundColor = AppColors.canvas;
+  static const Color _formBorderColor = AppColors.border;
+  static const bool _faceScanRequired = false;
 
   final profileService = CurrentProfileService();
   final programService = ProgramService();
   final beneficiaryService = BeneficiaryService();
   final questionnaireService = QuestionnaireService();
   final imagePicker = ImagePicker();
+  final faceCaptureService = FaceCaptureService();
   final BiometricService _biometricService = BiometricService();
 
   final fullNameController = TextEditingController();
@@ -47,17 +56,24 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
   String? selectedGender;
   DateTime? selectedDateOfBirth;
 
-  Map<String, dynamic>? questionnaire;
-  List<Map<String, dynamic>> questions = [];
+  Map<String, dynamic>? selectedQuestionnaire;
+  List<Map<String, dynamic>> questionnaireQuestions = [];
   final Map<String, dynamic> questionnaireAnswers = {};
 
   File? selectedPhoto;
+  File? selectedFacePhoto;
+  FaceQualityAssessment? faceQualityResult;
   String? _beneficiaryId;
   String? _uploadedPhotoUrl;
+  String? _uploadedFacePhotoUrl;
 
   bool loading = true;
   bool _savingDraft = false;
-  bool loadingQuestions = false;
+  bool _scanningFace = false;
+  bool _questionnaireExpanded = false;
+  bool questionnaireLoading = false;
+  String? questionnaireError;
+  int _registrationFormVersion = 0;
   String? error;
 
   String? get _tenantId => profile?['tenant_id']?.toString();
@@ -100,10 +116,86 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
 
     if (pickedFile == null) return;
 
+    final storedPhoto = await _copyImageToAppStorage(
+      pickedFile,
+      folderName: 'beneficiary_photos',
+      filePrefix: 'beneficiary',
+    );
+
+    if (!mounted) return;
+
     setState(() {
-      selectedPhoto = File(pickedFile.path);
+      selectedPhoto = storedPhoto;
       _uploadedPhotoUrl = null;
     });
+  }
+
+  Future<void> scanFace() async {
+    if (_scanningFace) return;
+
+    setState(() {
+      _scanningFace = true;
+      faceQualityResult = null;
+    });
+
+    try {
+      final result = await faceCaptureService.captureValidatedFace();
+
+      if (result == null) {
+        return;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        faceQualityResult = result.quality;
+        selectedFacePhoto = result.isAccepted ? result.file : null;
+        _uploadedFacePhotoUrl = null;
+      });
+
+      if (!result.isAccepted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(result.quality.message)));
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      debugPrint('Face scan failed: $e');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Face scan failed. Check logs.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _scanningFace = false;
+        });
+      }
+    }
+  }
+
+  Future<File> _copyImageToAppStorage(
+    XFile pickedFile, {
+    required String folderName,
+    required String filePrefix,
+  }) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final targetDirectory = Directory(p.join(directory.path, folderName));
+
+    if (!targetDirectory.existsSync()) {
+      await targetDirectory.create(recursive: true);
+    }
+
+    final extension = p.extension(pickedFile.path).isEmpty
+        ? '.jpg'
+        : p.extension(pickedFile.path);
+    final targetPath = p.join(
+      targetDirectory.path,
+      '${filePrefix}_${DateTime.now().millisecondsSinceEpoch}$extension',
+    );
+
+    return File(pickedFile.path).copy(targetPath);
   }
 
   Future<void> pickDateOfBirth() async {
@@ -117,6 +209,8 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
     );
 
     if (pickedDate == null) return;
+
+    if (!mounted) return;
 
     setState(() {
       selectedDateOfBirth = pickedDate;
@@ -136,10 +230,13 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
         return;
       }
 
-      final tenantId = currentProfile['tenant_id'] as String?;
-      final locationId = currentProfile['location_id'] as String?;
+      final tenantId = currentProfile['tenant_id']?.toString().trim();
+      final locationId = currentProfile['location_id']?.toString().trim();
 
-      if (tenantId == null || locationId == null) {
+      if (tenantId == null ||
+          tenantId.isEmpty ||
+          locationId == null ||
+          locationId.isEmpty) {
         if (!mounted) return;
         setState(() {
           error = 'Profile is missing tenant_id or location_id.';
@@ -152,6 +249,16 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
         tenantId: tenantId,
         locationId: locationId,
       );
+
+      if (assignedPrograms.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          error =
+              'No programs are assigned to your profile location. Ask an administrator to update your location or assign a program to it.';
+          loading = false;
+        });
+        return;
+      }
 
       if (!mounted) return;
 
@@ -171,52 +278,70 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
   }
 
   Future<void> loadQuestionnaireForProgram(String programId) async {
-    if (profile == null) return;
-
     setState(() {
-      loadingQuestions = true;
-      questionnaire = null;
-      questions = [];
-      questionnaireAnswers.clear();
+      questionnaireLoading = true;
+      questionnaireError = null;
+      selectedQuestionnaire = null;
+      questionnaireQuestions = [];
     });
 
     try {
-      final activeQuestionnaire = await questionnaireService
-          .getActiveQuestionnaire(
-            programId: programId,
-            tenantId: profile!['tenant_id'],
-          );
+      final profile = await profileService.getCurrentProfile();
 
-      if (activeQuestionnaire == null) {
-        if (!mounted) return;
+      final tenantId = profile?['tenant_id']?.toString();
+
+      if (tenantId == null || tenantId.isEmpty) {
+        throw Exception('Tenant ID missing. Cannot load questionnaire.');
+      }
+
+      final questionnaire = await questionnaireService
+          .getQuestionnaireForProgram(programId: programId, tenantId: tenantId);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (questionnaire == null) {
         setState(() {
-          loadingQuestions = false;
+          selectedQuestionnaire = null;
+          questionnaireQuestions = [];
+          questionnaireError =
+              'No questionnaire available. Login online once to cache it for offline use.';
         });
         return;
       }
 
-      final loadedQuestions = await questionnaireService.getQuestions(
-        questionnaireId: activeQuestionnaire['id'],
-        tenantId: profile!['tenant_id'],
-      );
+      final rawQuestions = questionnaire['questions'];
 
-      if (!mounted) return;
+      final loadedQuestions = rawQuestions is List
+          ? rawQuestions
+                .whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .toList()
+          : <Map<String, dynamic>>[];
 
       setState(() {
-        questionnaire = activeQuestionnaire;
-        questions = loadedQuestions;
-        loadingQuestions = false;
+        selectedQuestionnaire = questionnaire;
+        questionnaireQuestions = loadedQuestions;
+        questionnaireError = null;
+        _questionnaireExpanded = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
-        loadingQuestions = false;
+        questionnaireError = 'Failed to load questionnaire: $e';
+        selectedQuestionnaire = null;
+        questionnaireQuestions = [];
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load questionnaire: $e')),
-      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          questionnaireLoading = false;
+        });
+      }
     }
   }
 
@@ -320,6 +445,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
     TextInputType? keyboardType,
   }) {
     return TextField(
+      key: ValueKey('text-$questionId-$_registrationFormVersion'),
       keyboardType: keyboardType ?? _keyboardTypeForQuestion(questionType),
       maxLines: _maxLinesForQuestion(questionType),
       decoration: _googleFormInputDecoration(hintText),
@@ -336,6 +462,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
     final groupValue = questionnaireAnswers[questionId]?.toString();
 
     return RadioGroup<String>(
+      key: ValueKey('radio-$questionId-$_registrationFormVersion'),
       groupValue: groupValue,
       onChanged: (value) {
         setState(() {
@@ -367,6 +494,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
     final selectedAnswer = questionnaireAnswers[questionId]?.toString();
 
     return DropdownButtonFormField<String>(
+      key: ValueKey('dropdown-$questionId-$_registrationFormVersion'),
       initialValue: options.contains(selectedAnswer) ? selectedAnswer : null,
       isExpanded: true,
       decoration: _googleFormInputDecoration('Choose'),
@@ -415,18 +543,18 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    questionnaire!['title'] ?? 'Questionnaire',
+                    selectedQuestionnaire!['title'] ?? 'Questionnaire',
                     style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w500,
                       color: Color(0xFF202124),
                     ),
                   ),
-                  if (questionnaire!['description'] != null)
+                  if (selectedQuestionnaire!['description'] != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
-                        questionnaire!['description'].toString(),
+                        selectedQuestionnaire!['description'].toString(),
                         style: const TextStyle(
                           fontSize: 14,
                           height: 1.35,
@@ -579,12 +707,19 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
       return false;
     }
 
+    if (_faceScanRequired && selectedFacePhoto == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Scan beneficiary face')));
+      return false;
+    }
+
     return true;
   }
 
-  Future<String> _createBeneficiaryIfNeeded() async {
+  Future<BeneficiarySaveResult> _saveBeneficiaryDraft() async {
     if (_beneficiaryId != null) {
-      return _beneficiaryId!;
+      return BeneficiarySaveResult.synced(remoteId: _beneficiaryId!);
     }
 
     final user = Supabase.instance.client.auth.currentUser!;
@@ -609,16 +744,17 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
           : notesController.text.trim(),
     );
 
-    final beneficiaryId = await beneficiaryService.registerBeneficiary(draft);
+    final result = await beneficiaryService.saveBeneficiary(
+      draft: draft,
+      photoLocalPath: selectedPhoto?.path,
+      facePhotoLocalPath: selectedFacePhoto?.path,
+    );
 
-    if (beneficiaryId == null) {
-      throw Exception(
-        'Beneficiary was saved offline and cannot enroll biometrics yet',
-      );
+    if (result.remoteId != null) {
+      _beneficiaryId = result.remoteId;
     }
 
-    _beneficiaryId = beneficiaryId;
-    return beneficiaryId;
+    return result;
   }
 
   Future<String?> _uploadBeneficiaryPhoto({
@@ -643,23 +779,111 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
     return photoPath;
   }
 
+  Future<String?> _uploadFacePhoto({required String beneficiaryId}) async {
+    final facePhoto = selectedFacePhoto;
+    if (facePhoto == null) {
+      return null;
+    }
+
+    final facePhotoPath = await beneficiaryService.uploadBeneficiaryFacePhoto(
+      photoFile: facePhoto,
+      tenantId: _tenantId!,
+      beneficiaryId: beneficiaryId,
+    );
+
+    _uploadedFacePhotoUrl = facePhotoPath;
+    return facePhotoPath;
+  }
+
   Future<void> _saveQuestionnaireResponses({
     required String beneficiaryId,
   }) async {
-    if (questionnaire == null || selectedProgramId == null) {
+    if (selectedQuestionnaire == null || selectedProgramId == null) {
       return;
     }
 
     final user = Supabase.instance.client.auth.currentUser!;
 
-    await questionnaireService.saveQuestionnaireResponse(
+    try {
+      await questionnaireService.saveQuestionnaireResponse(
+        tenantId: _tenantId!,
+        questionnaireId: selectedQuestionnaire!['id'],
+        programId: selectedProgramId!,
+        beneficiaryId: beneficiaryId,
+        submittedBy: user.id,
+        answers: questionnaireAnswers,
+      );
+    } on PostgrestException {
+      rethrow;
+    } catch (error) {
+      if (!_isLikelyNetworkError(error)) {
+        rethrow;
+      }
+
+      await _saveQuestionnaireResponsesLocally(
+        localBeneficiaryId: beneficiaryId,
+        remoteBeneficiaryId: beneficiaryId,
+      );
+    }
+  }
+
+  Future<void> _saveQuestionnaireResponsesLocally({
+    required String localBeneficiaryId,
+    String? remoteBeneficiaryId,
+  }) async {
+    if (selectedQuestionnaire == null || selectedProgramId == null) {
+      return;
+    }
+
+    final user = Supabase.instance.client.auth.currentUser!;
+
+    await questionnaireService.saveQuestionnaireResponseLocally(
+      localBeneficiaryId: localBeneficiaryId,
+      remoteBeneficiaryId: remoteBeneficiaryId,
       tenantId: _tenantId!,
-      questionnaireId: questionnaire!['id'],
+      questionnaireId: selectedQuestionnaire!['id'],
       programId: selectedProgramId!,
-      beneficiaryId: beneficiaryId,
       submittedBy: user.id,
       answers: questionnaireAnswers,
     );
+  }
+
+  bool _isLikelyNetworkError(Object error) {
+    final message = error.toString().toLowerCase();
+
+    return message.contains('socket') ||
+        message.contains('network') ||
+        message.contains('connection') ||
+        message.contains('timeout') ||
+        message.contains('offline') ||
+        message.contains('failed host lookup') ||
+        message.contains('internet');
+  }
+
+  void _resetRegistrationFormForNextBeneficiary() {
+    fullNameController.clear();
+    nationalIdController.clear();
+    phoneController.clear();
+    householdSizeController.clear();
+    addressController.clear();
+    notesController.clear();
+
+    setState(() {
+      selectedGender = null;
+      selectedDateOfBirth = null;
+      questionnaireAnswers.clear();
+      selectedPhoto = null;
+      selectedFacePhoto = null;
+      faceQualityResult = null;
+      _beneficiaryId = null;
+      _uploadedPhotoUrl = null;
+      _uploadedFacePhotoUrl = null;
+      _registrationFormVersion += 1;
+      selectedQuestionnaire = null;
+      questionnaireQuestions = [];
+      questionnaireError = null;
+      _questionnaireExpanded = false;
+    });
   }
 
   Future<void> _saveDetailsAndMoveToFingerprint() async {
@@ -672,7 +896,26 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
         _savingDraft = true;
       });
 
-      final beneficiaryId = await _createBeneficiaryIfNeeded();
+      final saveResult = await _saveBeneficiaryDraft();
+
+      if (saveResult.savedLocally) {
+        await _saveQuestionnaireResponsesLocally(
+          localBeneficiaryId: saveResult.localId!,
+        );
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Saved locally. Sync when the device is online.'),
+          ),
+        );
+
+        context.go('/home');
+        return;
+      }
+
+      final beneficiaryId = saveResult.remoteId!;
 
       await _saveQuestionnaireResponses(beneficiaryId: beneficiaryId);
 
@@ -680,11 +923,16 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
         beneficiaryId: beneficiaryId,
       );
 
-      if (_uploadedPhotoUrl != null) {
+      _uploadedFacePhotoUrl ??= await _uploadFacePhoto(
+        beneficiaryId: beneficiaryId,
+      );
+
+      if (_uploadedFacePhotoUrl != null) {
         await _biometricService.enrollFacePhoto(
           beneficiaryId: beneficiaryId,
           tenantId: _tenantId!,
-          photoUrl: _uploadedPhotoUrl!,
+          photoUrl: _uploadedFacePhotoUrl!,
+          qualityScore: faceQualityResult?.qualityScore,
         );
       }
 
@@ -694,7 +942,7 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
         _savingDraft = false;
       });
 
-      Navigator.push(
+      final completed = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
           builder: (_) => FingerprintEnrollmentScreen(
@@ -703,12 +951,28 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
           ),
         ),
       );
+
+      if (!mounted) return;
+
+      if (completed == true) {
+        _resetRegistrationFormForNextBeneficiary();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Beneficiary registration completed. Form ready for next beneficiary.',
+            ),
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to save details: $e')));
+      debugPrint('Failed to save beneficiary details: $e');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to save details. Check logs.')),
+      );
     } finally {
       if (mounted && _savingDraft) {
         setState(() {
@@ -719,80 +983,304 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
   }
 
   Widget _buildBeneficiaryExtraFields() {
-    return Column(
-      children: [
-        DropdownButtonFormField<String>(
-          initialValue: selectedGender,
-          decoration: const InputDecoration(
-            labelText: 'Gender',
-            border: OutlineInputBorder(),
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(top: 8),
+        leading: const Icon(Icons.tune, color: AppColors.primary),
+        title: const Text(
+          'Additional Details',
+          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+        ),
+        subtitle: const Text(
+          'Gender, birth date, household, address, notes',
+          style: TextStyle(color: AppColors.muted, fontSize: 12),
+        ),
+        children: [
+          DropdownButtonFormField<String>(
+            initialValue: selectedGender,
+            decoration: const InputDecoration(
+              labelText: 'Gender',
+              prefixIcon: Icon(Icons.wc_outlined),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'Male', child: Text('Male')),
+              DropdownMenuItem(value: 'Female', child: Text('Female')),
+              DropdownMenuItem(value: 'Other', child: Text('Other')),
+            ],
+            onChanged: (value) {
+              setState(() {
+                selectedGender = value;
+              });
+            },
           ),
-          items: const [
-            DropdownMenuItem(value: 'Male', child: Text('Male')),
-            DropdownMenuItem(value: 'Female', child: Text('Female')),
-            DropdownMenuItem(value: 'Other', child: Text('Other')),
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: pickDateOfBirth,
+            child: InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'Date of Birth',
+                prefixIcon: Icon(Icons.calendar_today_outlined),
+              ),
+              child: Text(formattedDateOfBirth ?? 'Select date'),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: householdSizeController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Household Size',
+              prefixIcon: Icon(Icons.groups_outlined),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: addressController,
+            decoration: const InputDecoration(
+              labelText: 'Address',
+              prefixIcon: Icon(Icons.location_on_outlined),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: notesController,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              labelText: 'Notes',
+              prefixIcon: Icon(Icons.notes_outlined),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFaceVerificationSection() {
+    final quality = faceQualityResult;
+    final statusColor = quality == null
+        ? AppColors.muted
+        : quality.isAccepted
+        ? AppColors.primary
+        : AppColors.amber;
+
+    return FieldSurface(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            height: 36,
+            width: 36,
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.verified_user_outlined, color: statusColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Face Enrollment',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  quality == null
+                      ? 'Not scanned'
+                      : quality.isAccepted
+                      ? 'Face captured'
+                      : quality.message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (quality != null && quality.isAccepted)
+            const FieldStatusPill(label: 'Captured', icon: Icons.check_circle)
+          else
+            TextButton.icon(
+              onPressed: _scanningFace ? null : scanFace,
+              icon: _scanningFace
+                  ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.center_focus_strong, size: 18),
+              label: Text(_scanningFace ? 'Scanning' : 'Scan'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPhotoCaptureSection() {
+    return FieldSurface(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        children: [
+          FieldPhotoAvatar(
+            file: selectedPhoto,
+            label: fullNameController.text,
+            size: 64,
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Capture Photo',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+                ),
+                SizedBox(height: 3),
+                Text(
+                  'Required for field identity checks',
+                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: pickPhoto,
+            icon: const Icon(Icons.camera_alt_outlined, size: 18),
+            label: Text(selectedPhoto == null ? 'Capture' : 'Retake'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuestionnaireStatusTile() {
+    final hasQuestionnaire = selectedQuestionnaire != null;
+    final count = questionnaireQuestions.length;
+
+    if (questionnaireLoading) {
+      return const FieldSurface(
+        padding: EdgeInsets.all(14),
+        child: Row(
+          children: [
+            SizedBox(
+              height: 18,
+              width: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Expanded(child: Text('Loading questionnaire...')),
           ],
-          onChanged: (value) {
+        ),
+      );
+    }
+
+    if (questionnaireError != null) {
+      return FieldSurface(
+        color: AppColors.amberSoft,
+        borderColor: AppColors.amber.withValues(alpha: 0.28),
+        padding: const EdgeInsets.all(12),
+        child: Text(
+          questionnaireError!,
+          style: const TextStyle(
+            color: AppColors.amber,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      );
+    }
+
+    if (selectedProgramId == null) {
+      return const SizedBox.shrink();
+    }
+
+    return FieldSurface(
+      padding: EdgeInsets.zero,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: _questionnaireExpanded,
+          onExpansionChanged: (expanded) {
             setState(() {
-              selectedGender = value;
+              _questionnaireExpanded = expanded;
             });
           },
-        ),
-        const SizedBox(height: 16),
-        InkWell(
-          onTap: pickDateOfBirth,
-          child: InputDecorator(
-            decoration: const InputDecoration(
-              labelText: 'Date of Birth',
-              border: OutlineInputBorder(),
-            ),
-            child: Text(formattedDateOfBirth ?? 'Select date'),
+          leading: const Icon(
+            Icons.assignment_outlined,
+            color: AppColors.primary,
           ),
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: householdSizeController,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Household Size',
-            border: OutlineInputBorder(),
+          title: const Text(
+            'Questionnaire',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
           ),
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: addressController,
-          decoration: const InputDecoration(
-            labelText: 'Address',
-            border: OutlineInputBorder(),
+          subtitle: Text(
+            hasQuestionnaire
+                ? '$count questions'
+                : 'No published questionnaire',
+            style: const TextStyle(color: AppColors.muted, fontSize: 12),
           ),
+          trailing: hasQuestionnaire
+              ? const Icon(Icons.check_circle_outline, color: AppColors.primary)
+              : const Icon(Icons.info_outline, color: AppColors.amber),
+          children: hasQuestionnaire
+              ? [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildQuestionnaireHeader(),
+                        const SizedBox(height: 12),
+                        ...questionnaireQuestions.map(buildQuestionField),
+                      ],
+                    ),
+                  ),
+                ]
+              : const [],
         ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: notesController,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            labelText: 'Notes',
-            border: OutlineInputBorder(),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        appBar: AppBar(
+          leading: const FieldBackButton(),
+          title: const Text('Register Beneficiary'),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
 
     if (error != null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Register Beneficiary')),
-        body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            'Failed to load registration data:\n\n$error',
-            style: const TextStyle(color: Colors.red),
+        appBar: AppBar(
+          leading: const FieldBackButton(),
+          title: const Text('Register Beneficiary'),
+        ),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              FieldSurface(
+                color: AppColors.dangerSoft,
+                borderColor: AppColors.danger.withValues(alpha: 0.24),
+                child: Text(
+                  'Failed to load registration data:\n\n$error',
+                  style: const TextStyle(color: AppColors.danger),
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -800,113 +1288,129 @@ class _RegisterBeneficiaryScreenState extends State<RegisterBeneficiaryScreen> {
 
     return Scaffold(
       backgroundColor: _formBackgroundColor,
-      appBar: AppBar(title: const Text('Register Beneficiary')),
+      appBar: AppBar(
+        leading: const FieldBackButton(),
+        title: const Text('Register Beneficiary'),
+        actions: [
+          IconButton(
+            onPressed: _savingDraft ? null : _saveDetailsAndMoveToFingerprint,
+            icon: const Icon(Icons.save_outlined),
+            tooltip: 'Save',
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: AppColors.border),
+        ),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              DropdownButtonFormField<String>(
-                initialValue: selectedProgramId,
-                decoration: const InputDecoration(
-                  labelText: 'Program',
-                  border: OutlineInputBorder(),
-                ),
-                items: programs.map((program) {
-                  return DropdownMenuItem<String>(
-                    value: program['id'],
-                    child: Text(program['name'] ?? 'Unnamed Program'),
-                  );
-                }).toList(),
-                onChanged: (value) async {
-                  setState(() {
-                    selectedProgramId = value;
-                  });
+              FieldSurface(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedProgramId,
+                      decoration: const InputDecoration(
+                        labelText: 'Program',
+                        prefixIcon: Icon(Icons.work_outline),
+                      ),
+                      items: programs.map((program) {
+                        return DropdownMenuItem<String>(
+                          value: program['id'],
+                          child: Text(
+                            program['name'] ?? 'Unnamed Program',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) async {
+                        setState(() {
+                          selectedProgramId = value;
+                        });
 
-                  if (value != null) {
-                    await loadQuestionnaireForProgram(value);
-                  }
-                },
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: fullNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Full Name',
-                  border: OutlineInputBorder(),
+                        if (value != null) {
+                          await loadQuestionnaireForProgram(value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: fullNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Full Name *',
+                        prefixIcon: Icon(Icons.person_outline),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nationalIdController,
+                      decoration: const InputDecoration(
+                        labelText: 'National ID *',
+                        prefixIcon: Icon(Icons.badge_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: phoneController,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(
+                        labelText: 'Phone',
+                        prefixIcon: Icon(Icons.phone_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildBeneficiaryExtraFields(),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: nationalIdController,
-                decoration: const InputDecoration(
-                  labelText: 'National ID',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: phoneController,
-                decoration: const InputDecoration(
-                  labelText: 'Phone',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              _buildBeneficiaryExtraFields(),
-              const SizedBox(height: 24),
-              if (loadingQuestions)
-                const Center(child: CircularProgressIndicator()),
-              if (!loadingQuestions && questionnaire != null) ...[
-                _buildQuestionnaireHeader(),
-                const SizedBox(height: 12),
-                ...questions.map(buildQuestionField),
+              const SizedBox(height: 10),
+              _buildPhotoCaptureSection(),
+              if (selectedProgramId != null ||
+                  questionnaireLoading ||
+                  selectedQuestionnaire != null ||
+                  questionnaireError != null) ...[
+                const SizedBox(height: 10),
+                _buildQuestionnaireStatusTile(),
               ],
-              if (!loadingQuestions &&
-                  selectedProgramId != null &&
-                  questionnaire == null)
-                const Text(
-                  'No published questionnaire found for this program.',
-                  style: TextStyle(color: Colors.orange),
-                ),
-              const SizedBox(height: 20),
-              OutlinedButton.icon(
-                onPressed: pickPhoto,
-                icon: const Icon(Icons.camera_alt),
-                label: Text(
-                  selectedPhoto == null
-                      ? 'Capture Beneficiary Photo'
-                      : 'Retake Photo',
-                ),
-              ),
-              if (selectedPhoto != null) ...[
-                const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.file(
-                    selectedPhoto!,
-                    height: 180,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ],
+              const SizedBox(height: 10),
+              _buildFaceVerificationSection(),
               const SizedBox(height: 120),
             ],
           ),
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: ElevatedButton.icon(
-            onPressed: _savingDraft ? null : _saveDetailsAndMoveToFingerprint,
-            icon: const Icon(Icons.save),
-            label: Text(
-              _savingDraft
-                  ? 'Saving...'
-                  : 'Save Details & Continue to Fingerprint',
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: AppColors.border)),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _savingDraft
+                    ? null
+                    : _saveDetailsAndMoveToFingerprint,
+                icon: _savingDraft
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.save_alt_outlined),
+                label: Text(_savingDraft ? 'Saving…' : 'Save & Continue'),
+              ),
             ),
           ),
         ),
